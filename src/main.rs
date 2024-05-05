@@ -88,6 +88,12 @@ fn null(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
 fn value(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // TODO: Better Error Handling
 
+    match array(src) {
+        Ok(res) => return Ok(res),
+        Err(JSONParseError::NotFound) => {} // if not found, that ok
+        Err(e) => return Err(e),            // if any other error, propogate it up
+    }
+
     match string(src) {
         Ok(res) => return Ok(res),
         Err(JSONParseError::NotFound) => {} // if not found, that ok
@@ -148,6 +154,36 @@ fn elements(mut src: &str) -> Result<(&str, Vec<JSONValue>), JSONParseError> {
     Ok((src, values))
 }
 
+fn array(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+    // first we must parse the [] character
+
+    match src.strip_prefix("[") {
+        Some(rest) => src = ws(rest),
+        None => return Err(JSONParseError::NotFound),
+    };
+
+    // if this is true... then we have just parsed whitespace and there are no elements.
+    // thus, return empty array
+    if src.chars().next() == Some(']') {
+        src = &src[1..];
+
+        return Ok((src, JSONValue::Array(vec![])));
+    }
+
+    // otherwise, parse elemnts and return that
+
+    match elements(src) {
+        Ok((src, v)) => {
+            if src.chars().next() == Some(']') {
+                Ok((&src[1..], JSONValue::Array(v)))
+            } else {
+                Err(JSONParseError::MissingClosing)
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
 fn parse(mut src: &str) -> Result<JSONValue, JSONParseError> {
     match element(src) {
         Ok((_, res)) => Ok(res),
@@ -160,10 +196,10 @@ fn main() {
     // let sample =
     //     String::from("{\"1\":[2,4,null,true,false],\"name\":\"John\",\"e\":{\"key\":\"value\"}}");
 
-    let sample = "   \"322893784,aksjdfhkja\",null,    false   ";
+    let sample = "[1,2,true,null,false,\"Hello, World!\"]";
     // let sample = "    false       ";
 
     println!("Source is \"{:}\"", sample);
 
-    println!("Parser says {:?}", elements(sample));
+    println!("Parser says {:?}", parse(sample));
 }
