@@ -4,6 +4,7 @@ use std::collections::HashMap;
 enum JSONParseError {
     Error,
     NotFound,
+    UnexpectedChar,
 }
 
 #[derive(Debug)]
@@ -16,8 +17,6 @@ enum JSONValue {
     Array(Vec<JSONValue>),
     Object(HashMap<String, JSONValue>),
 }
-
-struct ParserContext {}
 
 // consume whitespace and return the remaining string
 fn ws(src: &str) -> &str {
@@ -34,18 +33,36 @@ fn bool(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     }
 }
 
-fn parse(src: &str) -> Result<JSONValue, JSONParseError> {
-    let mut ctx = src;
-    ctx = ws(ctx);
-    match bool(ctx) {
-        Ok((c, v)) => {
-            ctx = c;
-            println!("Bool found {:?}", v);
-        }
-        Err(_) => todo!(),
+fn null(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+    match src.strip_prefix("null") {
+        Some(rest) => Ok((rest, JSONValue::Null)),
+        None => Err(JSONParseError::NotFound),
     }
+}
 
-    Ok(JSONValue::String(ctx.to_string()))
+fn value(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+    // TODO: Better Error Handling
+    match bool(src) {
+        Ok(res) => return Ok(res),
+        Err(JSONParseError::NotFound) => {} // if not found, that ok
+        Err(e) => return Err(e),            // if any other error, propogate it up
+    };
+
+    match null(src) {
+        Ok(res) => return Ok(res),
+        Err(JSONParseError::NotFound) => {} // if not found, that ok
+        Err(e) => return Err(e),            // if any other error, propogate it up
+    };
+
+    Err(JSONParseError::NotFound)
+}
+
+fn parse(mut src: &str) -> Result<JSONValue, JSONParseError> {
+    src = ws(src);
+    match value(src) {
+        Ok((_, res)) => Ok(res),
+        Err(e) => Err(e),
+    }
 }
 
 fn main() {
@@ -53,8 +70,8 @@ fn main() {
     // let sample =
     //     String::from("{\"1\":[2,4,null,true,false],\"name\":\"John\",\"e\":{\"key\":\"value\"}}");
 
-    // let sample = "   true       ";
-    let sample = "    false       ";
+    let sample = "   null    false   ";
+    // let sample = "    false       ";
 
     println!("Source is \"{:}\"", sample);
 
