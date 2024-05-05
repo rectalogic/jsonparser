@@ -8,7 +8,7 @@ enum JSONParseError {
     MissingClosing,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum JSONValue {
     Null,
     True,
@@ -87,6 +87,12 @@ fn null(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
 
 fn value(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // TODO: Better Error Handling
+
+    match object(src) {
+        Ok(res) => return Ok(res),
+        Err(JSONParseError::NotFound) => {} // if not found, that ok
+        Err(e) => return Err(e),
+    }
 
     match array(src) {
         Ok(res) => return Ok(res),
@@ -184,6 +190,92 @@ fn array(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     }
 }
 
+fn object(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+    // first we must parse the [] character
+
+    match src.strip_prefix("{") {
+        Some(rest) => src = ws(rest),
+        None => return Err(JSONParseError::NotFound),
+    };
+
+    // if this is true... then we have just parsed whitespace and there are no elements.
+    // thus, return empty array
+    if src.chars().next() == Some('}') {
+        src = &src[1..];
+
+        // TODO:
+        return Ok((src, JSONValue::Object(HashMap::new())));
+    }
+
+    // otherwise, parse elemnts and return that
+
+    match members(src) {
+        Ok((src, v)) => {
+            if src.chars().next() == Some('}') {
+                let mut map: HashMap<String, JSONValue> = HashMap::new();
+
+                v.iter().for_each(|(key, value)| {
+                    map.insert(key.to_owned(), value.to_owned());
+                });
+
+                Ok((&src[1..], JSONValue::Object(map)))
+            } else {
+                Err(JSONParseError::MissingClosing)
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn members(mut src: &str) -> Result<(&str, Vec<(String, JSONValue)>), JSONParseError> {
+    let mut values = vec![];
+
+    loop {
+        match member(src) {
+            Ok((rest, v)) => {
+                src = rest;
+                values.push(v);
+            }
+            Err(e) => return Err(e),
+        }
+
+        // now we wanna consume the first character of src, if it is a comma
+        // or break otherwise
+        if src.chars().next() == Some(',') {
+            src = &src[1..];
+        } else {
+            break;
+        }
+    }
+
+    Ok((src, values))
+}
+
+fn member(mut src: &str) -> Result<(&str, (String, JSONValue)), JSONParseError> {
+    src = ws(src);
+
+    match string(src) {
+        Ok((rest, JSONValue::String(key))) => {
+            src = rest;
+            src = ws(src);
+
+            // now expect a ":"
+
+            if src.chars().next() == Some(':') {
+                src = &src[1..];
+                match element(src) {
+                    Ok((rest, el)) => return Ok((rest, (key, el))),
+                    Err(e) => return Err(e),
+                }
+            } else {
+                return Err(JSONParseError::UnexpectedChar);
+            }
+        }
+        Ok((_, _)) => Err(JSONParseError::Error),
+        Err(e) => Err(e),
+    }
+}
+
 fn parse(mut src: &str) -> Result<JSONValue, JSONParseError> {
     match element(src) {
         Ok((_, res)) => Ok(res),
@@ -193,13 +285,16 @@ fn parse(mut src: &str) -> Result<JSONValue, JSONParseError> {
 
 fn main() {
     println!("Hello, world!");
-    // let sample =
-    //     String::from("{\"1\":[2,4,null,true,false],\"name\":\"John\",\"e\":{\"key\":\"value\"}}");
+    let sample = "{\"1\":[2,4,null,true,false],\"name\":\"John\",\"e\":{\"key\":\"value\"}}";
 
-    let sample = "[1,2,true,null,false,\"Hello, World!\"]";
+    // let sample = "[1,2,true,null,false,\"Hello, World!\"]";
     // let sample = "    false       ";
+
+    // let sample = "{\"hi\": 3}";
 
     println!("Source is \"{:}\"", sample);
 
     println!("Parser says {:?}", parse(sample));
 }
+
+// TODO: Add Real Tests
