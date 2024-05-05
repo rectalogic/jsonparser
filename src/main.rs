@@ -21,7 +21,7 @@ enum JSONValue {
 
 // consume whitespace and return the remaining string
 fn ws(src: &str) -> &str {
-    src.trim_start_matches(|x| x == ' ')
+    src.trim_start_matches(&[' ', '\n', '\t', '\r'])
 }
 
 fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
@@ -285,12 +285,21 @@ fn parse(mut src: &str) -> Result<JSONValue, JSONParseError> {
 
 fn main() {
     println!("Hello, world!");
-    let sample = "{\"1\":[2,4,null,true,false],\"name\":\"John\",\"e\":{\"key\":\"value\"}}";
 
     // let sample = "[1,2,true,null,false,\"Hello, World!\"]";
     // let sample = "    false       ";
 
     // let sample = "{\"hi\": 3}";
+
+    let sample = r#"
+
+    {
+        "name": "John",
+        "1": [2, 4, null, true, false],
+        "e": { "key": "value" }
+    }
+      
+    "#;
 
     println!("Source is \"{:}\"", sample);
 
