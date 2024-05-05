@@ -115,9 +115,41 @@ fn value(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     Err(JSONParseError::NotFound)
 }
 
-fn parse(mut src: &str) -> Result<JSONValue, JSONParseError> {
+fn element(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     src = ws(src);
+
     match value(src) {
+        Ok((rest, v)) => Ok((ws(rest), v)),
+        Err(e) => Err(e),
+    }
+}
+
+fn elements(mut src: &str) -> Result<(&str, Vec<JSONValue>), JSONParseError> {
+    let mut values = vec![];
+
+    loop {
+        match element(src) {
+            Ok((rest, v)) => {
+                src = rest;
+                values.push(v);
+            }
+            Err(e) => return Err(e),
+        }
+
+        // now we wanna consume the first character of src, if it is a comma
+        // or break otherwise
+        if src.chars().next() == Some(',') {
+            src = &src[1..];
+        } else {
+            break;
+        }
+    }
+
+    Ok((src, values))
+}
+
+fn parse(mut src: &str) -> Result<JSONValue, JSONParseError> {
+    match element(src) {
         Ok((_, res)) => Ok(res),
         Err(e) => Err(e),
     }
@@ -128,10 +160,10 @@ fn main() {
     // let sample =
     //     String::from("{\"1\":[2,4,null,true,false],\"name\":\"John\",\"e\":{\"key\":\"value\"}}");
 
-    let sample = "   \"322893784aksjdfhkja\" null    false   ";
+    let sample = "   \"322893784,aksjdfhkja\",null,    false   ";
     // let sample = "    false       ";
 
     println!("Source is \"{:}\"", sample);
 
-    println!("Parser says {:?}", parse(sample));
+    println!("Parser says {:?}", elements(sample));
 }
