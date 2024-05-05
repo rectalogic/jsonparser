@@ -5,6 +5,7 @@ enum JSONParseError {
     Error,
     NotFound,
     UnexpectedChar,
+    MissingClosing,
 }
 
 #[derive(Debug)]
@@ -21,6 +22,29 @@ enum JSONValue {
 // consume whitespace and return the remaining string
 fn ws(src: &str) -> &str {
     src.trim_start_matches(|x| x == ' ')
+}
+
+fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+    // TODO: implement to spec
+
+    // first we must parse the " character
+
+    match src.strip_prefix("\"") {
+        Some(rest) => src = rest,
+        None => return Err(JSONParseError::NotFound),
+    };
+
+    // now we keep going until we find the first "
+    // lets just "find" the first "
+
+    match src.find("\"") {
+        Some(index) => {
+            let s = src[..index].to_string();
+            let rest = &src[index + 1..];
+            Ok((rest, JSONValue::String(s)))
+        }
+        None => Err(JSONParseError::MissingClosing),
+    }
 }
 
 fn number(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
@@ -64,6 +88,12 @@ fn null(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
 fn value(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // TODO: Better Error Handling
 
+    match string(src) {
+        Ok(res) => return Ok(res),
+        Err(JSONParseError::NotFound) => {} // if not found, that ok
+        Err(e) => return Err(e),            // if any other error, propogate it up
+    }
+
     match number(src) {
         Ok(res) => return Ok(res),
         Err(JSONParseError::NotFound) => {} // if not found, that ok
@@ -98,7 +128,7 @@ fn main() {
     // let sample =
     //     String::from("{\"1\":[2,4,null,true,false],\"name\":\"John\",\"e\":{\"key\":\"value\"}}");
 
-    let sample = "   322893784aksjdfhkja null    false   ";
+    let sample = "   \"322893784aksjdfhkja\" null    false   ";
     // let sample = "    false       ";
 
     println!("Source is \"{:}\"", sample);
