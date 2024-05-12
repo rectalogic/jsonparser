@@ -8,12 +8,12 @@ enum JSONParseError {
     MissingClosing,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum JSONValue {
     Null,
     True,
     False,
-    Number(i128),
+    Number(f64),
     String(String),
     Array(Vec<JSONValue>),
     Object(HashMap<String, JSONValue>),
@@ -47,6 +47,8 @@ fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     }
 }
 
+// fn onenine(src: &str) -> Result<(&str, JSONValue), JSONParseError> {}
+
 fn number(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // TODO: Actually support correct grammar
     // hacky version: just matches 0 to 9 for now
@@ -63,7 +65,7 @@ fn number(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     let rest = &src[num_chars_in_number..];
 
     // TODO: Error Handling
-    let value = digits.parse::<i128>().unwrap(); // https://doc.rust-lang.org/std/string/struct.String.html#method.parse
+    let value = digits.parse::<f64>().unwrap(); // https://doc.rust-lang.org/std/string/struct.String.html#method.parse
 
     Ok((rest, JSONValue::Number(value)))
 }
@@ -306,4 +308,124 @@ fn main() {
     println!("Parser says {:?}", parse(sample));
 }
 
-// TODO: Add Real Tests
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn ws_empty() {
+        let result = super::ws("");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn ws_space() {
+        let result = super::ws("\u{0020}");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn ws_linefeed() {
+        let result = super::ws("\u{000A}");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn ws_tab() {
+        let result = super::ws("\u{0009}");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn ws_carriage_return() {
+        let result = super::ws("\u{000D}");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn bool_true() {
+        match super::bool("true") {
+            Ok((_, v)) => assert_eq!(v, super::JSONValue::True),
+            Err(_) => panic!("Expected true"),
+        }
+    }
+
+    #[test]
+    fn bool_false() {
+        match super::bool("false") {
+            Ok((_, v)) => assert_eq!(v, super::JSONValue::False),
+            Err(_) => panic!("Expected false"),
+        }
+    }
+
+    #[test]
+    fn json_bool_true() {
+        match super::parse("true") {
+            Ok(v) => assert_eq!(v, super::JSONValue::True),
+            Err(_) => panic!("Expected true"),
+        }
+    }
+
+    #[test]
+    fn json_bool_false() {
+        match super::parse("false") {
+            Ok(v) => assert_eq!(v, super::JSONValue::False),
+            Err(_) => panic!("Expected false"),
+        }
+    }
+
+    #[test]
+    fn json_null() {
+        match super::parse("null") {
+            Ok(v) => assert_eq!(v, super::JSONValue::Null),
+            Err(_) => panic!("Expected null"),
+        }
+    }
+
+    #[test]
+    fn json_integer_positive() {
+        match super::parse("123") {
+            Ok(v) => assert_eq!(v, super::JSONValue::Number(123.0)),
+            Err(_) => panic!("Expected 123"),
+        }
+    }
+
+    #[test]
+    fn json_integer_negative() {
+        match super::parse("-123") {
+            Ok(v) => assert_eq!(v, super::JSONValue::Number(-123.0)),
+            Err(_) => panic!("Expected -123"),
+        }
+    }
+
+    #[test]
+    fn json_float_positive() {
+        match super::parse("123.456") {
+            Ok(v) => assert_eq!(v, super::JSONValue::Number(123.456)),
+            Err(_) => panic!("Expected 123.456"),
+        }
+    }
+
+    #[test]
+    fn json_float_negative() {
+        match super::parse("-123.456") {
+            Ok(v) => assert_eq!(v, super::JSONValue::Number(-123.456)),
+            Err(_) => panic!("Expected -123.456"),
+        }
+    }
+
+    #[test]
+    fn json_float_negative_exp() {
+        match super::parse("-123.456e-2") {
+            Ok(v) => assert_eq!(v, super::JSONValue::Number(-1.23456)),
+            Err(_) => panic!("Expected -1.23456"),
+        }
+    }
+
+    #[test]
+    fn json_float_positive_exp() {
+        match super::parse("123.456e2") {
+            Ok(v) => assert_eq!(v, super::JSONValue::Number(12345.6)),
+            Err(_) => panic!("Expected 12345.6"),
+        }
+    }
+}
