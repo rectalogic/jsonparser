@@ -47,27 +47,115 @@ fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     }
 }
 
-// fn onenine(src: &str) -> Result<(&str, JSONValue), JSONParseError> {}
+// numbers are weird
+
+fn onenine(src: &str) -> Result<(&str, char), JSONParseError> {
+    // check the first character of the string
+    match src.chars().next() {
+        // if the character exists
+        Some(c) => {
+            // check if it is numeric
+            if c.is_numeric() {
+                // if it is, we have to make sure it's not 0
+                if c == '0' {
+                    return Err(JSONParseError::NotFound);
+                }
+                Ok((&src[1..], c))
+            } else {
+                Err(JSONParseError::NotFound)
+            }
+        }
+        None => Err(JSONParseError::NotFound),
+    }
+}
+
+fn digit(src: &str) -> Result<(&str, char), JSONParseError> {
+    // check the first character of the string
+    match src.chars().next() {
+        // if the character exists
+        Some('0') => Ok((&src[1..], '0')),
+        Some(c) => onenine(src),
+        None => Err(JSONParseError::NotFound),
+    }
+}
+
+fn digits(mut src: &str) -> Result<(&str, Vec<char>), JSONParseError> {
+    let mut res = vec![];
+    loop {
+        match digit(src) {
+            Ok((rest, c)) => {
+                src = rest;
+                res.push(c);
+            }
+            Err(_) => {
+                break;
+            }
+        }
+    }
+
+    if res.is_empty() {
+        return Err(JSONParseError::NotFound);
+    }
+
+    Ok((src, res))
+}
+
+fn integer(mut src: &str) -> Result<(&str, i64), JSONParseError> {
+    // first check for negative symbol.
+    let negative;
+
+    match src.strip_prefix("-") {
+        Some(rest) => {
+            src = rest;
+            negative = true;
+        }
+        None => {
+            negative = false;
+        }
+    }
+
+    // try to parse onenine, then digits
+    match onenine(src) {
+        Ok((rest, c)) => match digits(rest) {
+            Ok((leftover, mut digis)) => {
+                digis.insert(0, c);
+                let int_str: String = digis.iter().collect();
+                let mut resulting_int: i64 = int_str.parse::<i64>().unwrap();
+                if negative {
+                    resulting_int *= -1;
+                }
+                return Ok((leftover, resulting_int));
+            }
+            Err(_) => {}
+        },
+        Err(_) => {}
+    }
+
+    match digit(src) {
+        Ok((rest, c)) => {
+            let mut n: i64 = c.to_digit(10).unwrap().into();
+
+            if negative {
+                n *= -1;
+            }
+
+            Ok((rest, n))
+        }
+
+        Err(e) => Err(e),
+    }
+}
 
 fn number(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // TODO: Actually support correct grammar
     // hacky version: just matches 0 to 9 for now
 
-    let len_following_number = src.trim_start_matches(char::is_numeric).len();
-    let num_chars_in_number = src.len() - len_following_number;
-
-    if num_chars_in_number == 0 {
-        return Err(JSONParseError::NotFound);
+    match integer(src) {
+        Ok((rest, num)) => {
+            return Ok((rest, JSONValue::Number(num as f64)));
+        }
+        Err(e) => Err(e),
     }
-
-    // get the first digit_chars characters
-    let digits = &src[..num_chars_in_number];
-    let rest = &src[num_chars_in_number..];
-
-    // TODO: Error Handling
-    let value = digits.parse::<f64>().unwrap(); // https://doc.rust-lang.org/std/string/struct.String.html#method.parse
-
-    Ok((rest, JSONValue::Number(value)))
 }
 
 fn bool(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
@@ -278,7 +366,7 @@ fn member(mut src: &str) -> Result<(&str, (String, JSONValue)), JSONParseError> 
     }
 }
 
-fn parse(mut src: &str) -> Result<JSONValue, JSONParseError> {
+fn parse(src: &str) -> Result<JSONValue, JSONParseError> {
     match element(src) {
         Ok((_, res)) => Ok(res),
         Err(e) => Err(e),
@@ -428,4 +516,16 @@ mod tests {
             Err(_) => panic!("Expected 12345.6"),
         }
     }
+
+    #[test]
+    fn json_basic_string() {
+        match super::parse(r#""Hello, World!""#) {
+            Ok(v) => assert_eq!(v, super::JSONValue::String("Hello, World!".to_string())),
+            Err(_) => panic!("Expected \"Hello, World!\""),
+        }
+    }
+
+    // fn json_escaped_string() {
+    //     let src = r#" "\"\\\/\b\f\n\r\t" "#;
+    // }
 }
