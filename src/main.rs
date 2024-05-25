@@ -163,6 +163,39 @@ fn fraction(src: &str) -> Result<(&str, f64), JSONParseError> {
     }
 }
 
+fn exponent(mut src: &str) -> Result<(&str, i64), JSONParseError> {
+    let first_char = src.chars().next();
+    if first_char == Some('e') || first_char == Some('E') {
+        src = &src[1..];
+    } else {
+        return Ok((src, 0));
+    }
+
+    let mut negative = false;
+
+    let sign_char = src.chars().next();
+    if sign_char == Some('+') {
+        // do nothing and skip
+        src = &src[1..];
+    } else if sign_char == Some('-') {
+        negative = true;
+        src = &src[1..];
+    }
+
+    // ok now digits
+    match digits(src) {
+        Ok((rest, digis)) => {
+            let num_str: String = digis.iter().collect();
+            let mut num: i64 = num_str.parse::<i64>().unwrap();
+            if negative {
+                num *= -1;
+            }
+            return Ok((rest, num));
+        }
+        Err(e) => return Err(e),
+    };
+}
+
 fn number(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // TODO: Actually support correct grammar
     // hacky version: just matches 0 to 9 for now
@@ -183,6 +216,17 @@ fn number(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
         Ok((rest, frac)) => {
             result += frac;
             src = rest;
+        }
+        Err(JSONParseError::NotFound) => {}
+        Err(e) => return Err(e),
+    }
+
+    match exponent(src) {
+        Ok((rest, exponent)) => {
+            src = rest;
+
+            let multipier = 10_f64.powf(exponent as f64);
+            result *= multipier;
         }
         Err(JSONParseError::NotFound) => {}
         Err(e) => return Err(e),
