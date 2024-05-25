@@ -146,16 +146,53 @@ fn integer(mut src: &str) -> Result<(&str, i64), JSONParseError> {
     }
 }
 
-fn number(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+fn fraction(src: &str) -> Result<(&str, f64), JSONParseError> {
+    match src.strip_prefix(".") {
+        Some(rest) => match digits(rest) {
+            Ok((leftover, mut digis)) => {
+                digis.insert(0, '.');
+                digis.insert(0, '0');
+
+                let fraction_str: String = digis.iter().collect();
+                let fraction_part = fraction_str.parse::<f64>().unwrap();
+                return Ok((leftover, fraction_part));
+            }
+            Err(e) => Err(e),
+        },
+        None => Ok((src, 0.0)),
+    }
+}
+
+fn number(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // TODO: Actually support correct grammar
     // hacky version: just matches 0 to 9 for now
 
+    let mut result;
+    let mut negative = false;
+
     match integer(src) {
         Ok((rest, num)) => {
-            return Ok((rest, JSONValue::Number(num as f64)));
+            result = num.abs() as f64;
+            negative = num.is_negative();
+            src = rest;
         }
-        Err(e) => Err(e),
+        Err(e) => return Err(e),
+    };
+
+    match fraction(src) {
+        Ok((rest, frac)) => {
+            result += frac;
+            src = rest;
+        }
+        Err(JSONParseError::NotFound) => {}
+        Err(e) => return Err(e),
     }
+
+    if negative {
+        result *= -1.0;
+    }
+
+    Ok((src, JSONValue::Number(result)))
 }
 
 fn bool(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
