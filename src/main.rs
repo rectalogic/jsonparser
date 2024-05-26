@@ -27,8 +27,6 @@ fn ws(src: &str) -> &str {
 fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // TODO: implement to spec
 
-    // first we must parse the " character
-
     match src.strip_prefix("\"") {
         Some(rest) => src = rest,
         None => return Err(JSONParseError::NotFound),
@@ -37,14 +35,50 @@ fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // now we keep going until we find the first "
     // lets just "find" the first "
 
-    match src.find("\"") {
-        Some(index) => {
-            let s = src[..index].to_string();
-            let rest = &src[index + 1..];
-            Ok((rest, JSONValue::String(s)))
+    let mut result: String = "".to_string();
+    let mut escaping = false;
+
+    let mut chars = src.chars();
+
+    loop {
+        let c = match chars.next() {
+            Some(c) => c,
+            None => return Err(JSONParseError::MissingClosing),
+        };
+
+        // if we have the \, then we are escaping, but don't add anything to result
+        if c == '\\' && !escaping {
+            escaping = true;
         }
-        None => Err(JSONParseError::MissingClosing),
+        // if we have the end quote but we are not escaping, then we are done
+        else if c == '"' && !escaping {
+            break;
+        } else if escaping {
+            // if we are escaping, then we need to check for special characters
+
+            match c {
+                '"' => result.push('"'),        // quotation mark
+                '\\' => result.push('\\'),      // reverse solidus
+                '/' => result.push('/'),        // solidus
+                'b' => result.push('\u{0008}'), // backspace
+                'f' => result.push('\u{000c}'), // form feed
+                'n' => result.push('\n'),       // line feed
+                'r' => result.push('\r'),       // carriage return
+                't' => result.push('\t'),       // tab
+                // TODO: Hex Escape
+                _ => {
+                    // can't escape whatever this is
+                    return Err(JSONParseError::UnexpectedChar);
+                }
+            }
+
+            escaping = false;
+        } else {
+            result.push(c);
+        }
     }
+
+    Ok((chars.as_str(), JSONValue::String(result)))
 }
 
 // numbers are weird
@@ -612,8 +646,8 @@ mod tests {
         let contents =
             fs::read_to_string("canada.json").expect("Should have been able to read the file");
         match super::parse(contents.as_str()) {
-            Ok(v) => {}
-            Err(e) => panic!("Errored"),
+            Ok(_) => {}
+            Err(_) => panic!("Errored"),
         }
     }
 
@@ -622,14 +656,29 @@ mod tests {
         let contents =
             fs::read_to_string("twitter.json").expect("Should have been able to read the file");
         match super::parse(contents.as_str()) {
-            Ok(v) => {}
+            Ok(_) => {}
             Err(e) => {
-                panic!("Errored")
+                let err_str = format!("Error: {:?}", e);
+                panic!("{}", err_str);
             }
         }
     }
 
-    // fn json_escaped_string() {
-    //     let src = r#" "\"\\\/\b\f\n\r\t" "#;
-    // }
+    #[test]
+    fn json_escaped_newline() {
+        let src = r#" 
+        
+        "hi there\nthis is a test"
+        
+        "#;
+
+        let expected = "hi there\nthis is a test";
+
+        match super::parse(src) {
+            Ok(v) => {
+                assert_eq!(v, super::JSONValue::String(expected.to_string()));
+            }
+            Err(_) => panic!("Expected \"hi there\nthis is a test\""),
+        }
+    }
 }
