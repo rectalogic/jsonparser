@@ -479,6 +479,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
 
     #[test]
     fn ws_empty() {
@@ -603,6 +604,28 @@ mod tests {
         match super::parse(r#""Hello, World!""#) {
             Ok(v) => assert_eq!(v, super::JSONValue::String("Hello, World!".to_string())),
             Err(_) => panic!("Expected \"Hello, World!\""),
+        }
+    }
+
+    #[test]
+    fn read_canada_json() {
+        let contents =
+            fs::read_to_string("canada.json").expect("Should have been able to read the file");
+        match super::parse(contents.as_str()) {
+            Ok(v) => {}
+            Err(e) => panic!("Errored"),
+        }
+    }
+
+    #[test]
+    fn read_twitter_json() {
+        let contents =
+            fs::read_to_string("twitter.json").expect("Should have been able to read the file");
+        match super::parse(contents.as_str()) {
+            Ok(v) => {}
+            Err(e) => {
+                panic!("Errored")
+            }
         }
     }
 
