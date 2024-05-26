@@ -108,7 +108,7 @@ fn digit(src: &str) -> Result<(&str, char), JSONParseError> {
     match src.chars().next() {
         // if the character exists
         Some('0') => Ok((&src[1..], '0')),
-        Some(c) => onenine(src),
+        Some(_) => onenine(src),
         None => Err(JSONParseError::NotFound),
     }
 }
@@ -235,7 +235,7 @@ fn number(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     // hacky version: just matches 0 to 9 for now
 
     let mut result;
-    let mut negative = false;
+    let negative;
 
     match integer(src) {
         Ok((rest, num)) => {
@@ -489,26 +489,34 @@ fn parse(src: &str) -> Result<JSONValue, JSONParseError> {
 }
 
 fn main() {
-    println!("Hello, world!");
+    let big_file = std::fs::read_to_string("twitter.json").expect("Could not read file");
 
-    // let sample = "[1,2,true,null,false,\"Hello, World!\"]";
-    // let sample = "    false       ";
+    print!("{}", big_file);
+    // let big_file = std::fs::read_to_string("canada.json").expect("Could not read file");
 
-    // let sample = "{\"hi\": 3}";
+    // how many bytes of data?
+    let num_bytes = big_file.len();
 
-    let sample = r#"
+    let mul = 1000;
+    let bytes_to_parse = num_bytes * mul;
 
-    {
-        "name": "John",
-        "1": [2, 4, null, true, false],
-        "e": { "key": "value" }
+    let start_time = std::time::Instant::now();
+    for _ in 0..mul {
+        let _ = parse(big_file.as_str());
     }
-      
-    "#;
+    let end_time = std::time::Instant::now();
 
-    println!("Source is \"{:}\"", sample);
+    let bps = bytes_to_parse as f64 / (end_time - start_time).as_secs_f64();
 
-    println!("Parser says {:?}", parse(sample));
+    let mbs = (bytes_to_parse as f64) / (1_000_000.0);
+    let mbps = mbs / (end_time - start_time).as_secs_f64();
+
+    let gbs = (bytes_to_parse as f64) / (1_000_000_000.0);
+    let gbps = gbs / (end_time - start_time).as_secs_f64();
+
+    println!("Parsing speed: {:.2} Bytes/s", bps);
+    println!("Parsing speed: {:.2} MB/s", mbps);
+    println!("Parsing speed: {:.2} GB/s", gbps);
 }
 
 #[cfg(test)]
