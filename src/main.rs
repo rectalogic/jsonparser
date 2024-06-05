@@ -1,11 +1,12 @@
-use std::collections::HashMap;
+use colored::Colorize;
+use std::{cmp::max, collections::HashMap, fs};
 
 #[derive(Debug)]
 enum JSONParseError {
-    Error,
+    Error(usize),
     NotFound,
-    UnexpectedChar,
-    MissingClosing,
+    UnexpectedChar(usize),
+    MissingClosing(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,7 +44,7 @@ fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     loop {
         let c = match chars.next() {
             Some(c) => c,
-            None => return Err(JSONParseError::MissingClosing),
+            None => return Err(JSONParseError::MissingClosing(src.len())),
         };
 
         // if we have the \, then we are escaping, but don't add anything to result
@@ -68,7 +69,7 @@ fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
                 // TODO: Hex Escape
                 _ => {
                     // can't escape whatever this is
-                    return Err(JSONParseError::UnexpectedChar);
+                    return Err(JSONParseError::UnexpectedChar(chars.count()));
                 }
             }
 
@@ -388,7 +389,7 @@ fn array(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
             if src.chars().next() == Some(']') {
                 Ok((&src[1..], JSONValue::Array(v)))
             } else {
-                Err(JSONParseError::MissingClosing)
+                Err(JSONParseError::MissingClosing(src.len()))
             }
         }
         Err(e) => Err(e),
@@ -425,7 +426,7 @@ fn object(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
 
                 Ok((&src[1..], JSONValue::Object(map)))
             } else {
-                Err(JSONParseError::MissingClosing)
+                Err(JSONParseError::MissingClosing(src.len()))
             }
         }
         Err(e) => Err(e),
@@ -473,10 +474,10 @@ fn member(mut src: &str) -> Result<(&str, (String, JSONValue)), JSONParseError> 
                     Err(e) => return Err(e),
                 }
             } else {
-                return Err(JSONParseError::UnexpectedChar);
+                return Err(JSONParseError::UnexpectedChar(src.len()));
             }
         }
-        Ok((_, _)) => Err(JSONParseError::Error),
+        Ok((_, _)) => Err(JSONParseError::Error(src.len())),
         Err(e) => Err(e),
     }
 }
@@ -489,34 +490,129 @@ fn parse(src: &str) -> Result<JSONValue, JSONParseError> {
 }
 
 fn main() {
-    let big_file = std::fs::read_to_string("twitter.json").expect("Could not read file");
+    // open and read the broken.json file
+    let text_file_contents = fs::read_to_string("broken.json").unwrap();
+    let src = text_file_contents.as_str();
 
-    print!("{}", big_file);
-    // let big_file = std::fs::read_to_string("canada.json").expect("Could not read file");
+    match parse(src) {
+        Ok(v) => {
+            println!("{:?}", v);
+        }
+        Err(e) => {
+            println!("{}", format!("Error: {:?}", e).normal().on_red());
+            let pos = match e {
+                JSONParseError::Error(p) => p,
+                JSONParseError::UnexpectedChar(p) => p,
+                JSONParseError::MissingClosing(p) => p,
+                JSONParseError::NotFound => 0,
+            };
 
-    // how many bytes of data?
-    let num_bytes = big_file.len();
+            let total = src.len();
+            let error_pos = total - pos;
 
-    let mul = 1000;
-    let bytes_to_parse = num_bytes * mul;
+            // lets get 2 lines from the src, one before and one of the error
 
-    let start_time = std::time::Instant::now();
-    for _ in 0..mul {
-        let _ = parse(big_file.as_str());
+            let lines = src.split("\n").collect::<Vec<&str>>();
+
+            let mut leftover = error_pos;
+            let mut line_index = 0;
+            let mut last_line = "";
+            let err_line;
+            loop {
+                let line = lines[line_index];
+                let line_len = line.len();
+
+                if leftover < line_len {
+                    err_line = line;
+                    break;
+                } else {
+                    last_line = line;
+                    leftover -= line_len + 1;
+                    line_index += 1;
+                }
+            }
+
+            // // print seperator -'s
+
+            println!("{}", "-".repeat(max(last_line.len(), err_line.len())));
+            println!("{}", last_line);
+            println!("{}", err_line);
+
+            // print an ascii arrow to point to the error
+            for i in 0..3 {
+                for _ in 0..(leftover) {
+                    print!(" ");
+                }
+                println!("{}", if i == 0 { "^" } else { "|" });
+            }
+
+            // print the error message
+            match e {
+                JSONParseError::Error(_) => println!(
+                    "{}",
+                    format!(
+                        "Error: {} on Line {} Char {}",
+                        "Error",
+                        line_index + 1,
+                        leftover
+                    )
+                    .red()
+                ),
+                JSONParseError::UnexpectedChar(_) => println!(
+                    "{}",
+                    format!(
+                        "Error: {} on Line {} Char {}",
+                        "Unexpected Character",
+                        line_index + 1,
+                        leftover
+                    )
+                    .red()
+                ),
+                JSONParseError::MissingClosing(_) => println!(
+                    "{}",
+                    format!(
+                        "Error: {} on Line {} Char {}",
+                        "Missing Closing",
+                        line_index + 1,
+                        leftover
+                    )
+                    .red()
+                ),
+                JSONParseError::NotFound => {
+                    println!("{}", format!("Error: {}", "Not Found"))
+                }
+            }
+        }
     }
-    let end_time = std::time::Instant::now();
 
-    let bps = bytes_to_parse as f64 / (end_time - start_time).as_secs_f64();
+    // let big_file = std::fs::read_to_string("twitter.json").expect("Could not read file");
 
-    let mbs = (bytes_to_parse as f64) / (1_000_000.0);
-    let mbps = mbs / (end_time - start_time).as_secs_f64();
+    // print!("{}", big_file);
+    // // let big_file = std::fs::read_to_string("canada.json").expect("Could not read file");
 
-    let gbs = (bytes_to_parse as f64) / (1_000_000_000.0);
-    let gbps = gbs / (end_time - start_time).as_secs_f64();
+    // // how many bytes of data?
+    // let num_bytes = big_file.len();
 
-    println!("Parsing speed: {:.2} Bytes/s", bps);
-    println!("Parsing speed: {:.2} MB/s", mbps);
-    println!("Parsing speed: {:.2} GB/s", gbps);
+    // let mul = 1000;
+    // let bytes_to_parse = num_bytes * mul;
+
+    // let start_time = std::time::Instant::now();
+    // for _ in 0..mul {
+    //     let _ = parse(big_file.as_str());
+    // }
+    // let end_time = std::time::Instant::now();
+
+    // let bps = bytes_to_parse as f64 / (end_time - start_time).as_secs_f64();
+
+    // let mbs = (bytes_to_parse as f64) / (1_000_000.0);
+    // let mbps = mbs / (end_time - start_time).as_secs_f64();
+
+    // let gbs = (bytes_to_parse as f64) / (1_000_000_000.0);
+    // let gbps = gbs / (end_time - start_time).as_secs_f64();
+
+    // println!("Parsing speed: {:.2} Bytes/s", bps);
+    // println!("Parsing speed: {:.2} MB/s", mbps);
+    // println!("Parsing speed: {:.2} GB/s", gbps);
 }
 
 #[cfg(test)]

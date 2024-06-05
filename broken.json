@@ -1,0 +1,6 @@
+{
+  "name": "John Doe",
+  "age": 30,
+  "cars": ["Ford \e This has an invalid escape", "BMW", "Fiat"],
+  "favourite_color": "blue"
+}
