@@ -577,10 +577,10 @@ fn main() {
         }
     }
 
-    // let big_file = std::fs::read_to_string("twitter.json").expect("Could not read file");
+    let big_file = std::fs::read_to_string("twitter.json").expect("Could not read file");
 
     // print!("{}", big_file);
-    let big_file = std::fs::read_to_string("canada.json").expect("Could not read file");
+    // let big_file = std::fs::read_to_string("canada.json").expect("Could not read file");
 
     // how many bytes of data?
     let num_bytes = big_file.len();
