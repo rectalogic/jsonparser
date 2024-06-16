@@ -26,8 +26,6 @@ fn ws(src: &str) -> &str {
 }
 
 fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
-    // TODO: implement to spec
-
     match src.strip_prefix("\"") {
         Some(rest) => src = rest,
         None => return Err(JSONParseError::NotFound),
@@ -66,7 +64,6 @@ fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
                 'n' => result.push('\n'),       // line feed
                 'r' => result.push('\r'),       // carriage return
                 't' => result.push('\t'),       // tab
-                // TODO: Hex Escape
                 _ => {
                     // can't escape whatever this is
                     return Err(JSONParseError::UnexpectedChar(chars.count()));
@@ -232,9 +229,6 @@ fn exponent(mut src: &str) -> Result<(&str, i64), JSONParseError> {
 }
 
 fn number(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
-    // TODO: Actually support correct grammar
-    // hacky version: just matches 0 to 9 for now
-
     let mut result;
     let negative;
 
@@ -292,8 +286,6 @@ fn null(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
 }
 
 fn value(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
-    // TODO: Better Error Handling
-
     match object(src) {
         Ok(res) => return Ok(res),
         Err(JSONParseError::NotFound) => {} // if not found, that ok
@@ -354,8 +346,8 @@ fn elements(mut src: &str) -> Result<(&str, Vec<JSONValue>), JSONParseError> {
             Err(e) => return Err(e),
         }
 
-        // now we wanna consume the first character of src, if it is a comma
-        // or break otherwise
+        // now we wanna consume the first character of src
+        // if it is a comma, or break otherwise
         if src.chars().next() == Some(',') {
             src = &src[1..];
         } else {
@@ -588,31 +580,31 @@ fn main() {
     // let big_file = std::fs::read_to_string("twitter.json").expect("Could not read file");
 
     // print!("{}", big_file);
-    // // let big_file = std::fs::read_to_string("canada.json").expect("Could not read file");
+    let big_file = std::fs::read_to_string("canada.json").expect("Could not read file");
 
-    // // how many bytes of data?
-    // let num_bytes = big_file.len();
+    // how many bytes of data?
+    let num_bytes = big_file.len();
 
-    // let mul = 1000;
-    // let bytes_to_parse = num_bytes * mul;
+    let mul = 1000;
+    let bytes_to_parse = num_bytes * mul;
 
-    // let start_time = std::time::Instant::now();
-    // for _ in 0..mul {
-    //     let _ = parse(big_file.as_str());
-    // }
-    // let end_time = std::time::Instant::now();
+    let start_time = std::time::Instant::now();
+    for _ in 0..mul {
+        let _ = parse(big_file.as_str());
+    }
+    let end_time = std::time::Instant::now();
 
-    // let bps = bytes_to_parse as f64 / (end_time - start_time).as_secs_f64();
+    let bps = bytes_to_parse as f64 / (end_time - start_time).as_secs_f64();
 
-    // let mbs = (bytes_to_parse as f64) / (1_000_000.0);
-    // let mbps = mbs / (end_time - start_time).as_secs_f64();
+    let mbs = (bytes_to_parse as f64) / (1_000_000.0);
+    let mbps = mbs / (end_time - start_time).as_secs_f64();
 
-    // let gbs = (bytes_to_parse as f64) / (1_000_000_000.0);
-    // let gbps = gbs / (end_time - start_time).as_secs_f64();
+    let gbs = (bytes_to_parse as f64) / (1_000_000_000.0);
+    let gbps = gbs / (end_time - start_time).as_secs_f64();
 
-    // println!("Parsing speed: {:.2} Bytes/s", bps);
-    // println!("Parsing speed: {:.2} MB/s", mbps);
-    // println!("Parsing speed: {:.2} GB/s", gbps);
+    println!("Parsing speed: {:.2} Bytes/s", bps);
+    println!("Parsing speed: {:.2} MB/s", mbps);
+    println!("Parsing speed: {:.2} GB/s", gbps);
 }
 
 #[cfg(test)]
@@ -783,6 +775,40 @@ mod tests {
                 assert_eq!(v, super::JSONValue::String(expected.to_string()));
             }
             Err(_) => panic!("Expected \"hi there\nthis is a test\""),
+        }
+    }
+
+    #[test]
+    fn json_list_of_numbers() {
+        let src = r#"[1, 2, 3, 4, 5]"#;
+
+        let expected = super::JSONValue::Array(vec![
+            super::JSONValue::Number(1.0),
+            super::JSONValue::Number(2.0),
+            super::JSONValue::Number(3.0),
+            super::JSONValue::Number(4.0),
+            super::JSONValue::Number(5.0),
+        ]);
+
+        match super::parse(src) {
+            Ok(v) => {
+                assert_eq!(v, expected);
+            }
+            Err(_) => panic!("Expected [1, 2, 3, 4, 5]"),
+        }
+    }
+
+    #[test]
+    fn json_empty_list() {
+        let src = r#"[]"#;
+
+        let expected = super::JSONValue::Array(vec![]);
+
+        match super::parse(src) {
+            Ok(v) => {
+                assert_eq!(v, expected);
+            }
+            Err(_) => panic!("Expected []"),
         }
     }
 }
