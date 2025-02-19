@@ -22,7 +22,7 @@ enum JSONValue {
 
 // consume whitespace and return the remaining string
 fn ws(src: &str) -> &str {
-    src.trim_start_matches(&[' ', '\n', '\t', '\r'])
+    src.trim_start_matches([' ', '\n', '\t', '\r'])
 }
 
 fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
@@ -113,16 +113,9 @@ fn digit(src: &str) -> Result<(&str, char), JSONParseError> {
 
 fn digits(mut src: &str) -> Result<(&str, Vec<char>), JSONParseError> {
     let mut res = vec![];
-    loop {
-        match digit(src) {
-            Ok((rest, c)) => {
-                src = rest;
-                res.push(c);
-            }
-            Err(_) => {
-                break;
-            }
-        }
+    while let Ok((rest, c)) = digit(src) {
+        src = rest;
+        res.push(c);
     }
 
     if res.is_empty() {
@@ -147,20 +140,16 @@ fn integer(mut src: &str) -> Result<(&str, i64), JSONParseError> {
     }
 
     // try to parse onenine, then digits
-    match onenine(src) {
-        Ok((rest, c)) => match digits(rest) {
-            Ok((leftover, mut digis)) => {
-                digis.insert(0, c);
-                let int_str: String = digis.iter().collect();
-                let mut resulting_int: i64 = int_str.parse::<i64>().unwrap();
-                if negative {
-                    resulting_int *= -1;
-                }
-                return Ok((leftover, resulting_int));
+    if let Ok((rest, c)) = onenine(src) {
+        if let Ok((leftover, mut digis)) = digits(rest) {
+            digis.insert(0, c);
+            let int_str: String = digis.iter().collect();
+            let mut resulting_int: i64 = int_str.parse::<i64>().unwrap();
+            if negative {
+                resulting_int *= -1;
             }
-            Err(_) => {}
-        },
-        Err(_) => {}
+            return Ok((leftover, resulting_int));
+        }
     }
 
     match digit(src) {
@@ -187,7 +176,7 @@ fn fraction(src: &str) -> Result<(&str, f64), JSONParseError> {
 
                 let fraction_str: String = digis.iter().collect();
                 let fraction_part = fraction_str.parse::<f64>().unwrap();
-                return Ok((leftover, fraction_part));
+                Ok((leftover, fraction_part))
             }
             Err(e) => Err(e),
         },
@@ -222,10 +211,10 @@ fn exponent(mut src: &str) -> Result<(&str, i64), JSONParseError> {
             if negative {
                 num *= -1;
             }
-            return Ok((rest, num));
+            Ok((rest, num))
         }
-        Err(e) => return Err(e),
-    };
+        Err(e) => Err(e),
+    }
 }
 
 fn number(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
@@ -348,7 +337,7 @@ fn elements(mut src: &str) -> Result<(&str, Vec<JSONValue>), JSONParseError> {
 
         // now we wanna consume the first character of src
         // if it is a comma, or break otherwise
-        if src.chars().next() == Some(',') {
+        if src.starts_with(',') {
             src = &src[1..];
         } else {
             break;
@@ -368,18 +357,16 @@ fn array(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
 
     // if this is true... then we have just parsed whitespace and there are no elements.
     // thus, return empty array
-    if src.chars().next() == Some(']') {
-        src = &src[1..];
-
-        return Ok((src, JSONValue::Array(vec![])));
+    if let Some(rest) = src.strip_prefix(']') {
+        return Ok((rest, JSONValue::Array(vec![])));
     }
 
     // otherwise, parse elemnts and return that
 
     match elements(src) {
         Ok((src, v)) => {
-            if src.chars().next() == Some(']') {
-                Ok((&src[1..], JSONValue::Array(v)))
+            if let Some(rest) = src.strip_prefix(']') {
+                Ok((rest, JSONValue::Array(v)))
             } else {
                 Err(JSONParseError::MissingClosing(src.len()))
             }
@@ -398,25 +385,23 @@ fn object(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
 
     // if this is true... then we have just parsed whitespace and there are no elements.
     // thus, return empty array
-    if src.chars().next() == Some('}') {
-        src = &src[1..];
-
+    if let Some(rest) = src.strip_prefix('}') {
         // TODO:
-        return Ok((src, JSONValue::Object(HashMap::new())));
+        return Ok((rest, JSONValue::Object(HashMap::new())));
     }
 
     // otherwise, parse elemnts and return that
 
     match members(src) {
         Ok((src, v)) => {
-            if src.chars().next() == Some('}') {
+            if let Some(rest) = src.strip_prefix('}') {
                 let mut map: HashMap<String, JSONValue> = HashMap::new();
 
                 v.iter().for_each(|(key, value)| {
                     map.insert(key.to_owned(), value.to_owned());
                 });
 
-                Ok((&src[1..], JSONValue::Object(map)))
+                Ok((rest, JSONValue::Object(map)))
             } else {
                 Err(JSONParseError::MissingClosing(src.len()))
             }
@@ -425,6 +410,7 @@ fn object(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn members(mut src: &str) -> Result<(&str, Vec<(String, JSONValue)>), JSONParseError> {
     let mut values = vec![];
 
@@ -439,7 +425,7 @@ fn members(mut src: &str) -> Result<(&str, Vec<(String, JSONValue)>), JSONParseE
 
         // now we wanna consume the first character of src, if it is a comma
         // or break otherwise
-        if src.chars().next() == Some(',') {
+        if src.starts_with(',') {
             src = &src[1..];
         } else {
             break;
@@ -459,14 +445,14 @@ fn member(mut src: &str) -> Result<(&str, (String, JSONValue)), JSONParseError> 
 
             // now expect a ":"
 
-            if src.chars().next() == Some(':') {
+            if src.starts_with(':') {
                 src = &src[1..];
                 match element(src) {
-                    Ok((rest, el)) => return Ok((rest, (key, el))),
-                    Err(e) => return Err(e),
+                    Ok((rest, el)) => Ok((rest, (key, el))),
+                    Err(e) => Err(e),
                 }
             } else {
-                return Err(JSONParseError::UnexpectedChar(src.len()));
+                Err(JSONParseError::UnexpectedChar(src.len()))
             }
         }
         Ok((_, _)) => Err(JSONParseError::Error(src.len())),
@@ -571,7 +557,7 @@ fn main() {
                     .red()
                 ),
                 JSONParseError::NotFound => {
-                    println!("{}", format!("Error: {}", "Not Found"))
+                    println!("Error: Not Found")
                 }
             }
         }
