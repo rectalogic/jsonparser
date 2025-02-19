@@ -1,5 +1,5 @@
 use colored::Colorize;
-use std::{cmp::max, collections::HashMap, fs};
+use std::{borrow::Cow, cmp::max, collections::HashMap, fs};
 
 #[derive(Debug)]
 enum JSONParseError {
@@ -10,14 +10,14 @@ enum JSONParseError {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum JSONValue {
+enum JSONValue<'a> {
     Null,
     True,
     False,
     Number(f64),
-    String(String),
-    Array(Vec<JSONValue>),
-    Object(HashMap<String, JSONValue>),
+    String(Cow<'a, str>),
+    Array(Vec<JSONValue<'a>>),
+    Object(HashMap<Cow<'a, str>, JSONValue<'a>>),
 }
 
 const WHITESPACE: &[char] = &[' ', '\n', '\t', '\r'];
@@ -36,24 +36,32 @@ fn string(mut src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
     // now we keep going until we find the first "
     // lets just "find" the first "
 
-    let mut result: String = "".to_string();
+    let mut result = String::new();
     let mut escaping = false;
 
-    let mut chars = src.chars();
+    let mut chars = src.char_indices();
 
     loop {
-        let c = match chars.next() {
-            Some(c) => c,
+        let (i, c) = match chars.next() {
+            Some(r) => r,
             None => return Err(JSONParseError::MissingClosing(src.len())),
         };
 
         // if we have the \, then we are escaping, but don't add anything to result
         if c == '\\' && !escaping {
             escaping = true;
+            if result.is_empty() {
+                result = src[..i].to_string();
+            }
         }
         // if we have the end quote but we are not escaping, then we are done
         else if c == '"' && !escaping {
-            break;
+            let cow = if result.is_empty() {
+                Cow::Borrowed(&src[..i])
+            } else {
+                Cow::Owned(result)
+            };
+            return Ok(Some((&src[i + 1..], JSONValue::String(cow))));
         } else if escaping {
             // if we are escaping, then we need to check for special characters
 
@@ -68,17 +76,15 @@ fn string(mut src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
                 't' => result.push('\t'),       // tab
                 _ => {
                     // can't escape whatever this is
-                    return Err(JSONParseError::UnexpectedChar(chars.count()));
+                    return Err(JSONParseError::UnexpectedChar(src.len() - i));
                 }
             }
 
             escaping = false;
-        } else {
+        } else if !result.is_empty() {
             result.push(c);
         }
     }
-
-    Ok(Some((chars.as_str(), JSONValue::String(result))))
 }
 
 fn number(src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
@@ -210,10 +216,10 @@ fn object(mut src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
 
     if let Some((src, v)) = members(src)? {
         if let Some(rest) = src.strip_prefix('}') {
-            let mut map: HashMap<String, JSONValue> = HashMap::new();
+            let mut map: HashMap<Cow<str>, JSONValue> = HashMap::new();
 
-            v.iter().for_each(|(key, value)| {
-                map.insert(key.to_owned(), value.to_owned());
+            v.into_iter().for_each(|(key, value)| {
+                map.insert(key, value);
             });
 
             Ok(Some((rest, JSONValue::Object(map))))
@@ -226,7 +232,7 @@ fn object(mut src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
 }
 
 #[allow(clippy::type_complexity)]
-fn members(mut src: &str) -> Result<Option<(&str, Vec<(String, JSONValue)>)>, JSONParseError> {
+fn members(mut src: &str) -> Result<Option<(&str, Vec<(Cow<str>, JSONValue)>)>, JSONParseError> {
     let mut values = vec![];
 
     loop {
@@ -250,7 +256,7 @@ fn members(mut src: &str) -> Result<Option<(&str, Vec<(String, JSONValue)>)>, JS
 }
 
 #[allow(clippy::type_complexity)]
-fn member(mut src: &str) -> Result<Option<(&str, (String, JSONValue))>, JSONParseError> {
+fn member(mut src: &str) -> Result<Option<(&str, (Cow<str>, JSONValue))>, JSONParseError> {
     src = ws(src);
     if let Some((rest, JSONValue::String(key))) = string(src)? {
         src = rest;
@@ -358,7 +364,7 @@ fn handle_parse(src: &str, silent: bool) {
     match parse(src) {
         Ok(Some(v)) => {
             if !silent {
-                println!("{:?}", v);
+                dbg!(v);
             }
         }
         Ok(None) => format_error(src, 0, JSONParseError::NotFound),
@@ -393,8 +399,8 @@ fn main() {
     let bytes_to_parse = num_bytes * mul;
 
     let start_time = std::time::Instant::now();
-    for _ in 0..mul {
-        handle_parse(big_file.as_str(), true);
+    for i in 0..mul {
+        handle_parse(big_file.as_str(), i != 0);
     }
     let end_time = std::time::Instant::now();
 
@@ -536,7 +542,10 @@ mod tests {
     #[test]
     fn json_basic_string() {
         match super::parse(r#""Hello, World!""#) {
-            Ok(Some(v)) => assert_eq!(v, super::JSONValue::String("Hello, World!".to_string())),
+            Ok(Some(v)) => assert_eq!(
+                v,
+                super::JSONValue::String(super::Cow::from("Hello, World!"))
+            ),
             Ok(None) | Err(_) => panic!("Expected \"Hello, World!\""),
         }
     }
@@ -573,7 +582,7 @@ mod tests {
 
         match super::parse(src) {
             Ok(Some(v)) => {
-                assert_eq!(v, super::JSONValue::String(expected.to_string()));
+                assert_eq!(v, super::JSONValue::String(super::Cow::from(expected)));
             }
             Ok(None) | Err(_) => panic!("Expected \"hi there\nthis is a test\""),
         }
