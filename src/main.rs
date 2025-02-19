@@ -20,15 +20,17 @@ enum JSONValue {
     Object(HashMap<String, JSONValue>),
 }
 
+const WHITESPACE: &[char] = &[' ', '\n', '\t', '\r'];
+
 // consume whitespace and return the remaining string
 fn ws(src: &str) -> &str {
-    src.trim_start_matches([' ', '\n', '\t', '\r'])
+    src.trim_start_matches(WHITESPACE)
 }
 
-fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+fn string(mut src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
     match src.strip_prefix("\"") {
         Some(rest) => src = rest,
-        None => return Err(JSONParseError::NotFound),
+        None => return Ok(None),
     };
 
     // now we keep going until we find the first "
@@ -76,263 +78,78 @@ fn string(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
         }
     }
 
-    Ok((chars.as_str(), JSONValue::String(result)))
+    Ok(Some((chars.as_str(), JSONValue::String(result))))
 }
 
-// numbers are weird
-
-fn onenine(src: &str) -> Result<(&str, char), JSONParseError> {
-    // check the first character of the string
-    match src.chars().next() {
-        // if the character exists
-        Some(c) => {
-            // check if it is numeric
-            if c.is_numeric() {
-                // if it is, we have to make sure it's not 0
-                if c == '0' {
-                    return Err(JSONParseError::NotFound);
-                }
-                Ok((&src[1..], c))
-            } else {
-                Err(JSONParseError::NotFound)
-            }
-        }
-        None => Err(JSONParseError::NotFound),
+fn number(src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
+    if !src.starts_with([
+        '+', '-', '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    ]) {
+        return Ok(None);
     }
+    let mut delimiters = Vec::from(WHITESPACE);
+    delimiters.extend([']', '}', ',', ':']);
+    let index = match src.find(&delimiters[..]) {
+        None => src.len(),
+        Some(index) => index,
+    };
+
+    let number = &src[..index]
+        .parse::<f64>()
+        .map_err(|_| JSONParseError::Error(src.len()))?;
+    Ok(Some((&src[index..], JSONValue::Number(*number))))
 }
 
-fn digit(src: &str) -> Result<(&str, char), JSONParseError> {
-    // check the first character of the string
-    match src.chars().next() {
-        // if the character exists
-        Some('0') => Ok((&src[1..], '0')),
-        Some(_) => onenine(src),
-        None => Err(JSONParseError::NotFound),
-    }
+fn bool(src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
+    Ok(src
+        .strip_prefix("true")
+        .map(|rest| (rest, JSONValue::True))
+        .or_else(|| {
+            src.strip_prefix("false")
+                .map(|rest| (rest, JSONValue::False))
+        }))
 }
 
-fn digits(mut src: &str) -> Result<(&str, Vec<char>), JSONParseError> {
-    let mut res = vec![];
-    while let Ok((rest, c)) = digit(src) {
-        src = rest;
-        res.push(c);
-    }
-
-    if res.is_empty() {
-        return Err(JSONParseError::NotFound);
-    }
-
-    Ok((src, res))
+fn null(src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
+    Ok(src.strip_prefix("null").map(|rest| (rest, JSONValue::Null)))
 }
 
-fn integer(mut src: &str) -> Result<(&str, i64), JSONParseError> {
-    // first check for negative symbol.
-    let negative;
-
-    match src.strip_prefix("-") {
-        Some(rest) => {
-            src = rest;
-            negative = true;
-        }
-        None => {
-            negative = false;
-        }
-    }
-
-    // try to parse onenine, then digits
-    if let Ok((rest, c)) = onenine(src) {
-        if let Ok((leftover, mut digis)) = digits(rest) {
-            digis.insert(0, c);
-            let int_str: String = digis.iter().collect();
-            let mut resulting_int: i64 = int_str.parse::<i64>().unwrap();
-            if negative {
-                resulting_int *= -1;
-            }
-            return Ok((leftover, resulting_int));
-        }
-    }
-
-    match digit(src) {
-        Ok((rest, c)) => {
-            let mut n: i64 = c.to_digit(10).unwrap().into();
-
-            if negative {
-                n *= -1;
-            }
-
-            Ok((rest, n))
-        }
-
-        Err(e) => Err(e),
-    }
-}
-
-fn fraction(src: &str) -> Result<(&str, f64), JSONParseError> {
-    match src.strip_prefix(".") {
-        Some(rest) => match digits(rest) {
-            Ok((leftover, mut digis)) => {
-                digis.insert(0, '.');
-                digis.insert(0, '0');
-
-                let fraction_str: String = digis.iter().collect();
-                let fraction_part = fraction_str.parse::<f64>().unwrap();
-                Ok((leftover, fraction_part))
-            }
-            Err(e) => Err(e),
-        },
-        None => Ok((src, 0.0)),
-    }
-}
-
-fn exponent(mut src: &str) -> Result<(&str, i64), JSONParseError> {
-    let first_char = src.chars().next();
-    if first_char == Some('e') || first_char == Some('E') {
-        src = &src[1..];
+fn value(src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
+    if let Some(res) = object(src)? {
+        Ok(Some(res))
+    } else if let Some(res) = array(src)? {
+        Ok(Some(res)) // if any other error, propogate it up
+    } else if let Some(res) = string(src)? {
+        Ok(Some(res)) // if any other error, propogate it up
+    } else if let Some(res) = number(src)? {
+        Ok(Some(res)) // if any other error, propogate it up
+    } else if let Some(res) = bool(src)? {
+        Ok(Some(res)) // if any other error, propogate it up
+    } else if let Some(res) = null(src)? {
+        Ok(Some(res)) // if any other error, propogate it up
     } else {
-        return Ok((src, 0));
-    }
-
-    let mut negative = false;
-
-    let sign_char = src.chars().next();
-    if sign_char == Some('+') {
-        // do nothing and skip
-        src = &src[1..];
-    } else if sign_char == Some('-') {
-        negative = true;
-        src = &src[1..];
-    }
-
-    // ok now digits
-    match digits(src) {
-        Ok((rest, digis)) => {
-            let num_str: String = digis.iter().collect();
-            let mut num: i64 = num_str.parse::<i64>().unwrap();
-            if negative {
-                num *= -1;
-            }
-            Ok((rest, num))
-        }
-        Err(e) => Err(e),
+        Ok(None)
     }
 }
 
-fn number(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
-    let mut result;
-    let negative;
-
-    match integer(src) {
-        Ok((rest, num)) => {
-            result = num.abs() as f64;
-            negative = num.is_negative();
-            src = rest;
-        }
-        Err(e) => return Err(e),
-    };
-
-    match fraction(src) {
-        Ok((rest, frac)) => {
-            result += frac;
-            src = rest;
-        }
-        Err(JSONParseError::NotFound) => {}
-        Err(e) => return Err(e),
-    }
-
-    match exponent(src) {
-        Ok((rest, exponent)) => {
-            src = rest;
-
-            let multipier = 10_f64.powf(exponent as f64);
-            result *= multipier;
-        }
-        Err(JSONParseError::NotFound) => {}
-        Err(e) => return Err(e),
-    }
-
-    if negative {
-        result *= -1.0;
-    }
-
-    Ok((src, JSONValue::Number(result)))
-}
-
-fn bool(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
-    match src.strip_prefix("true") {
-        Some(rest) => Ok((rest, JSONValue::True)),
-        None => match src.strip_prefix("false") {
-            Some(rest) => Ok((rest, JSONValue::False)),
-            None => Err(JSONParseError::NotFound),
-        },
-    }
-}
-
-fn null(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
-    match src.strip_prefix("null") {
-        Some(rest) => Ok((rest, JSONValue::Null)),
-        None => Err(JSONParseError::NotFound),
-    }
-}
-
-fn value(src: &str) -> Result<(&str, JSONValue), JSONParseError> {
-    match object(src) {
-        Ok(res) => return Ok(res),
-        Err(JSONParseError::NotFound) => {} // if not found, that ok
-        Err(e) => return Err(e),
-    }
-
-    match array(src) {
-        Ok(res) => return Ok(res),
-        Err(JSONParseError::NotFound) => {} // if not found, that ok
-        Err(e) => return Err(e),            // if any other error, propogate it up
-    }
-
-    match string(src) {
-        Ok(res) => return Ok(res),
-        Err(JSONParseError::NotFound) => {} // if not found, that ok
-        Err(e) => return Err(e),            // if any other error, propogate it up
-    }
-
-    match number(src) {
-        Ok(res) => return Ok(res),
-        Err(JSONParseError::NotFound) => {} // if not found, that ok
-        Err(e) => return Err(e),            // if any other error, propogate it up
-    }
-
-    match bool(src) {
-        Ok(res) => return Ok(res),
-        Err(JSONParseError::NotFound) => {} // if not found, that ok
-        Err(e) => return Err(e),            // if any other error, propogate it up
-    };
-
-    match null(src) {
-        Ok(res) => return Ok(res),
-        Err(JSONParseError::NotFound) => {} // if not found, that ok
-        Err(e) => return Err(e),            // if any other error, propogate it up
-    };
-
-    Err(JSONParseError::NotFound)
-}
-
-fn element(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+fn element(mut src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
     src = ws(src);
-
-    match value(src) {
-        Ok((rest, v)) => Ok((ws(rest), v)),
-        Err(e) => Err(e),
+    if let Some((rest, v)) = value(src)? {
+        Ok(Some((ws(rest), v)))
+    } else {
+        Ok(None)
     }
 }
 
-fn elements(mut src: &str) -> Result<(&str, Vec<JSONValue>), JSONParseError> {
+fn elements(mut src: &str) -> Result<Option<(&str, Vec<JSONValue>)>, JSONParseError> {
     let mut values = vec![];
 
     loop {
-        match element(src) {
-            Ok((rest, v)) => {
-                src = rest;
-                values.push(v);
-            }
-            Err(e) => return Err(e),
+        if let Some((rest, v)) = element(src)? {
+            src = rest;
+            values.push(v);
+        } else {
+            return Ok(None);
         }
 
         // now we wanna consume the first character of src
@@ -344,83 +161,80 @@ fn elements(mut src: &str) -> Result<(&str, Vec<JSONValue>), JSONParseError> {
         }
     }
 
-    Ok((src, values))
+    Ok(Some((src, values)))
 }
 
-fn array(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+fn array(mut src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
     // first we must parse the [] character
 
-    match src.strip_prefix("[") {
+    match src.strip_prefix('[') {
         Some(rest) => src = ws(rest),
-        None => return Err(JSONParseError::NotFound),
+        None => return Ok(None),
     };
 
     // if this is true... then we have just parsed whitespace and there are no elements.
     // thus, return empty array
     if let Some(rest) = src.strip_prefix(']') {
-        return Ok((rest, JSONValue::Array(vec![])));
+        return Ok(Some((rest, JSONValue::Array(vec![]))));
     }
 
     // otherwise, parse elemnts and return that
 
-    match elements(src) {
-        Ok((src, v)) => {
-            if let Some(rest) = src.strip_prefix(']') {
-                Ok((rest, JSONValue::Array(v)))
-            } else {
-                Err(JSONParseError::MissingClosing(src.len()))
-            }
+    if let Some((src, v)) = elements(src)? {
+        if let Some(rest) = src.strip_prefix(']') {
+            Ok(Some((rest, JSONValue::Array(v))))
+        } else {
+            Err(JSONParseError::MissingClosing(src.len()))
         }
-        Err(e) => Err(e),
+    } else {
+        Ok(None)
     }
 }
 
-fn object(mut src: &str) -> Result<(&str, JSONValue), JSONParseError> {
+fn object(mut src: &str) -> Result<Option<(&str, JSONValue)>, JSONParseError> {
     // first we must parse the [] character
 
     match src.strip_prefix("{") {
         Some(rest) => src = ws(rest),
-        None => return Err(JSONParseError::NotFound),
+        None => return Ok(None),
     };
 
     // if this is true... then we have just parsed whitespace and there are no elements.
     // thus, return empty array
     if let Some(rest) = src.strip_prefix('}') {
         // TODO:
-        return Ok((rest, JSONValue::Object(HashMap::new())));
+        return Ok(Some((rest, JSONValue::Object(HashMap::new()))));
     }
 
     // otherwise, parse elemnts and return that
 
-    match members(src) {
-        Ok((src, v)) => {
-            if let Some(rest) = src.strip_prefix('}') {
-                let mut map: HashMap<String, JSONValue> = HashMap::new();
+    if let Some((src, v)) = members(src)? {
+        if let Some(rest) = src.strip_prefix('}') {
+            let mut map: HashMap<String, JSONValue> = HashMap::new();
 
-                v.iter().for_each(|(key, value)| {
-                    map.insert(key.to_owned(), value.to_owned());
-                });
+            v.iter().for_each(|(key, value)| {
+                map.insert(key.to_owned(), value.to_owned());
+            });
 
-                Ok((rest, JSONValue::Object(map)))
-            } else {
-                Err(JSONParseError::MissingClosing(src.len()))
-            }
+            Ok(Some((rest, JSONValue::Object(map))))
+        } else {
+            Err(JSONParseError::MissingClosing(src.len()))
         }
-        Err(e) => Err(e),
+    } else {
+        Ok(None)
     }
 }
 
 #[allow(clippy::type_complexity)]
-fn members(mut src: &str) -> Result<(&str, Vec<(String, JSONValue)>), JSONParseError> {
+fn members(mut src: &str) -> Result<Option<(&str, Vec<(String, JSONValue)>)>, JSONParseError> {
     let mut values = vec![];
 
     loop {
-        match member(src) {
-            Ok((rest, v)) => {
-                src = rest;
-                values.push(v);
-            }
-            Err(e) => return Err(e),
+        if let Some((rest, v)) = member(src)? {
+            src = rest;
+            values.push(v);
+        } else {
+            return Ok(None);
         }
 
         // now we wanna consume the first character of src, if it is a comma
@@ -432,38 +246,131 @@ fn members(mut src: &str) -> Result<(&str, Vec<(String, JSONValue)>), JSONParseE
         }
     }
 
-    Ok((src, values))
+    Ok(Some((src, values)))
 }
 
-fn member(mut src: &str) -> Result<(&str, (String, JSONValue)), JSONParseError> {
+#[allow(clippy::type_complexity)]
+fn member(mut src: &str) -> Result<Option<(&str, (String, JSONValue))>, JSONParseError> {
     src = ws(src);
+    if let Some((rest, JSONValue::String(key))) = string(src)? {
+        src = rest;
+        src = ws(src);
 
-    match string(src) {
-        Ok((rest, JSONValue::String(key))) => {
-            src = rest;
-            src = ws(src);
+        // now expect a ":"
 
-            // now expect a ":"
-
-            if src.starts_with(':') {
-                src = &src[1..];
-                match element(src) {
-                    Ok((rest, el)) => Ok((rest, (key, el))),
-                    Err(e) => Err(e),
-                }
+        if src.starts_with(':') {
+            if let Some((rest, el)) = element(&src[1..])? {
+                Ok(Some((rest, (key, el))))
             } else {
-                Err(JSONParseError::UnexpectedChar(src.len()))
+                Ok(None)
             }
+        } else {
+            Err(JSONParseError::UnexpectedChar(src.len()))
         }
-        Ok((_, _)) => Err(JSONParseError::Error(src.len())),
-        Err(e) => Err(e),
+    } else {
+        Ok(None)
     }
 }
 
-fn parse(src: &str) -> Result<JSONValue, JSONParseError> {
-    match element(src) {
-        Ok((_, res)) => Ok(res),
-        Err(e) => Err(e),
+fn parse(src: &str) -> Result<Option<JSONValue>, JSONParseError> {
+    Ok(element(src)?.map(|(_, value)| value))
+}
+
+fn format_error(src: &str, pos: usize, error: JSONParseError) {
+    let total = src.len();
+    let error_pos = total - pos;
+
+    // lets get 2 lines from the src, one before and one of the error
+
+    let lines = src.split("\n").collect::<Vec<&str>>();
+
+    let mut leftover = error_pos;
+    let mut line_index = 0;
+    let mut last_line = "";
+    let err_line;
+    loop {
+        let line = lines[line_index];
+        let line_len = line.len();
+
+        if leftover < line_len {
+            err_line = line;
+            break;
+        } else {
+            last_line = line;
+            leftover -= line_len + 1;
+            line_index += 1;
+        }
+    }
+
+    // // print seperator -'s
+
+    println!("{}", "-".repeat(max(last_line.len(), err_line.len())));
+    println!("{}", last_line);
+    println!("{}", err_line);
+
+    // print an ascii arrow to point to the error
+    for i in 0..3 {
+        for _ in 0..(leftover) {
+            print!(" ");
+        }
+        println!("{}", if i == 0 { "^" } else { "|" });
+    }
+
+    // print the error message
+    match error {
+        JSONParseError::Error(_) => println!(
+            "{}",
+            format!(
+                "Error: {} on Line {} Char {}",
+                "Error",
+                line_index + 1,
+                leftover
+            )
+            .red()
+        ),
+        JSONParseError::UnexpectedChar(_) => println!(
+            "{}",
+            format!(
+                "Error: {} on Line {} Char {}",
+                "Unexpected Character",
+                line_index + 1,
+                leftover
+            )
+            .red()
+        ),
+        JSONParseError::MissingClosing(_) => println!(
+            "{}",
+            format!(
+                "Error: {} on Line {} Char {}",
+                "Missing Closing",
+                line_index + 1,
+                leftover
+            )
+            .red()
+        ),
+        JSONParseError::NotFound => {
+            println!("Error: Not Found")
+        }
+    }
+}
+
+fn handle_parse(src: &str, silent: bool) {
+    match parse(src) {
+        Ok(Some(v)) => {
+            if !silent {
+                println!("{:?}", v);
+            }
+        }
+        Ok(None) => format_error(src, 0, JSONParseError::NotFound),
+        Err(e) => {
+            println!("{}", format!("Error: {:?}", e).normal().on_red());
+            match e {
+                JSONParseError::Error(p) => format_error(src, p, e),
+                JSONParseError::UnexpectedChar(p) => format_error(src, p, e),
+                JSONParseError::MissingClosing(p) => format_error(src, p, e),
+                JSONParseError::NotFound => format_error(src, 0, e),
+            };
+        }
     }
 }
 
@@ -472,96 +379,7 @@ fn main() {
     let text_file_contents = fs::read_to_string("broken.json").unwrap();
     let src = text_file_contents.as_str();
 
-    match parse(src) {
-        Ok(v) => {
-            println!("{:?}", v);
-        }
-        Err(e) => {
-            println!("{}", format!("Error: {:?}", e).normal().on_red());
-            let pos = match e {
-                JSONParseError::Error(p) => p,
-                JSONParseError::UnexpectedChar(p) => p,
-                JSONParseError::MissingClosing(p) => p,
-                JSONParseError::NotFound => 0,
-            };
-
-            let total = src.len();
-            let error_pos = total - pos;
-
-            // lets get 2 lines from the src, one before and one of the error
-
-            let lines = src.split("\n").collect::<Vec<&str>>();
-
-            let mut leftover = error_pos;
-            let mut line_index = 0;
-            let mut last_line = "";
-            let err_line;
-            loop {
-                let line = lines[line_index];
-                let line_len = line.len();
-
-                if leftover < line_len {
-                    err_line = line;
-                    break;
-                } else {
-                    last_line = line;
-                    leftover -= line_len + 1;
-                    line_index += 1;
-                }
-            }
-
-            // // print seperator -'s
-
-            println!("{}", "-".repeat(max(last_line.len(), err_line.len())));
-            println!("{}", last_line);
-            println!("{}", err_line);
-
-            // print an ascii arrow to point to the error
-            for i in 0..3 {
-                for _ in 0..(leftover) {
-                    print!(" ");
-                }
-                println!("{}", if i == 0 { "^" } else { "|" });
-            }
-
-            // print the error message
-            match e {
-                JSONParseError::Error(_) => println!(
-                    "{}",
-                    format!(
-                        "Error: {} on Line {} Char {}",
-                        "Error",
-                        line_index + 1,
-                        leftover
-                    )
-                    .red()
-                ),
-                JSONParseError::UnexpectedChar(_) => println!(
-                    "{}",
-                    format!(
-                        "Error: {} on Line {} Char {}",
-                        "Unexpected Character",
-                        line_index + 1,
-                        leftover
-                    )
-                    .red()
-                ),
-                JSONParseError::MissingClosing(_) => println!(
-                    "{}",
-                    format!(
-                        "Error: {} on Line {} Char {}",
-                        "Missing Closing",
-                        line_index + 1,
-                        leftover
-                    )
-                    .red()
-                ),
-                JSONParseError::NotFound => {
-                    println!("Error: Not Found")
-                }
-            }
-        }
-    }
+    handle_parse(src, false);
 
     let big_file = std::fs::read_to_string("twitter.json").expect("Could not read file");
 
@@ -576,7 +394,7 @@ fn main() {
 
     let start_time = std::time::Instant::now();
     for _ in 0..mul {
-        let _ = parse(big_file.as_str());
+        handle_parse(big_file.as_str(), true);
     }
     let end_time = std::time::Instant::now();
 
@@ -630,96 +448,96 @@ mod tests {
     #[test]
     fn bool_true() {
         match super::bool("true") {
-            Ok((_, v)) => assert_eq!(v, super::JSONValue::True),
-            Err(_) => panic!("Expected true"),
+            Ok(Some((_, v))) => assert_eq!(v, super::JSONValue::True),
+            Ok(None) | Err(_) => panic!("Expected true"),
         }
     }
 
     #[test]
     fn bool_false() {
         match super::bool("false") {
-            Ok((_, v)) => assert_eq!(v, super::JSONValue::False),
-            Err(_) => panic!("Expected false"),
+            Ok(Some((_, v))) => assert_eq!(v, super::JSONValue::False),
+            Ok(None) | Err(_) => panic!("Expected false"),
         }
     }
 
     #[test]
     fn json_bool_true() {
         match super::parse("true") {
-            Ok(v) => assert_eq!(v, super::JSONValue::True),
-            Err(_) => panic!("Expected true"),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::True),
+            Ok(None) | Err(_) => panic!("Expected true"),
         }
     }
 
     #[test]
     fn json_bool_false() {
         match super::parse("false") {
-            Ok(v) => assert_eq!(v, super::JSONValue::False),
-            Err(_) => panic!("Expected false"),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::False),
+            Ok(None) | Err(_) => panic!("Expected false"),
         }
     }
 
     #[test]
     fn json_null() {
         match super::parse("null") {
-            Ok(v) => assert_eq!(v, super::JSONValue::Null),
-            Err(_) => panic!("Expected null"),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::Null),
+            Ok(None) | Err(_) => panic!("Expected null"),
         }
     }
 
     #[test]
     fn json_integer_positive() {
         match super::parse("123") {
-            Ok(v) => assert_eq!(v, super::JSONValue::Number(123.0)),
-            Err(_) => panic!("Expected 123"),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::Number(123.0)),
+            Ok(None) | Err(_) => panic!("Expected 123"),
         }
     }
 
     #[test]
     fn json_integer_negative() {
         match super::parse("-123") {
-            Ok(v) => assert_eq!(v, super::JSONValue::Number(-123.0)),
-            Err(_) => panic!("Expected -123"),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::Number(-123.0)),
+            Ok(None) | Err(_) => panic!("Expected -123"),
         }
     }
 
     #[test]
     fn json_float_positive() {
         match super::parse("123.456") {
-            Ok(v) => assert_eq!(v, super::JSONValue::Number(123.456)),
-            Err(_) => panic!("Expected 123.456"),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::Number(123.456)),
+            Ok(None) | Err(_) => panic!("Expected 123.456"),
         }
     }
 
     #[test]
     fn json_float_negative() {
         match super::parse("-123.456") {
-            Ok(v) => assert_eq!(v, super::JSONValue::Number(-123.456)),
-            Err(_) => panic!("Expected -123.456"),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::Number(-123.456)),
+            Ok(None) | Err(_) => panic!("Expected -123.456"),
         }
     }
 
     #[test]
     fn json_float_negative_exp() {
         match super::parse("-123.456e-2") {
-            Ok(v) => assert_eq!(v, super::JSONValue::Number(-1.23456)),
-            Err(_) => panic!("Expected -1.23456"),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::Number(-1.23456)),
+            Ok(None) | Err(_) => panic!("Expected -1.23456"),
         }
     }
 
     #[test]
     fn json_float_positive_exp() {
         match super::parse("123.456e2") {
-            Ok(v) => assert_eq!(v, super::JSONValue::Number(12345.6)),
-            Err(_) => panic!("Expected 12345.6"),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::Number(12345.6)),
+            Ok(None) | Err(_) => panic!("Expected 12345.6"),
         }
     }
 
     #[test]
     fn json_basic_string() {
         match super::parse(r#""Hello, World!""#) {
-            Ok(v) => assert_eq!(v, super::JSONValue::String("Hello, World!".to_string())),
-            Err(_) => panic!("Expected \"Hello, World!\""),
+            Ok(Some(v)) => assert_eq!(v, super::JSONValue::String("Hello, World!".to_string())),
+            Ok(None) | Err(_) => panic!("Expected \"Hello, World!\""),
         }
     }
 
@@ -728,8 +546,8 @@ mod tests {
         let contents =
             fs::read_to_string("canada.json").expect("Should have been able to read the file");
         match super::parse(contents.as_str()) {
-            Ok(_) => {}
-            Err(_) => panic!("Errored"),
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => panic!("Errored"),
         }
     }
 
@@ -738,29 +556,26 @@ mod tests {
         let contents =
             fs::read_to_string("twitter.json").expect("Should have been able to read the file");
         match super::parse(contents.as_str()) {
-            Ok(_) => {}
-            Err(e) => {
-                let err_str = format!("Error: {:?}", e);
-                panic!("{}", err_str);
-            }
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => panic!("Errored"),
         }
     }
 
     #[test]
     fn json_escaped_newline() {
-        let src = r#" 
-        
+        let src = r#"
+
         "hi there\nthis is a test"
-        
+
         "#;
 
         let expected = "hi there\nthis is a test";
 
         match super::parse(src) {
-            Ok(v) => {
+            Ok(Some(v)) => {
                 assert_eq!(v, super::JSONValue::String(expected.to_string()));
             }
-            Err(_) => panic!("Expected \"hi there\nthis is a test\""),
+            Ok(None) | Err(_) => panic!("Expected \"hi there\nthis is a test\""),
         }
     }
 
@@ -777,10 +592,10 @@ mod tests {
         ]);
 
         match super::parse(src) {
-            Ok(v) => {
+            Ok(Some(v)) => {
                 assert_eq!(v, expected);
             }
-            Err(_) => panic!("Expected [1, 2, 3, 4, 5]"),
+            Ok(None) | Err(_) => panic!("Expected [1, 2, 3, 4, 5]"),
         }
     }
 
@@ -791,10 +606,10 @@ mod tests {
         let expected = super::JSONValue::Array(vec![]);
 
         match super::parse(src) {
-            Ok(v) => {
+            Ok(Some(v)) => {
                 assert_eq!(v, expected);
             }
-            Err(_) => panic!("Expected []"),
+            Ok(None) | Err(_) => panic!("Expected []"),
         }
     }
 }
